@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="JP Reader">
+<meta name="theme-color" content="#f6f5f2">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon.svg">
+<title>JP Reader</title>
+<style>
+  :root{--bg:#f6f5f2;--card:#fff;--ink:#1d1f23;--mute:#6b6f76;--line:#e4e2dd;--blue:#3e8ef7}
+  @media (prefers-color-scheme:dark){:root{--bg:#141518;--card:#1d1f23;--ink:#ececec;--mute:#9a9ea6;--line:#2e3137}}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif}
+  #view{position:fixed;top:0;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));border:0;width:100%;height:calc(100% - 58px - env(safe-area-inset-bottom));background:var(--bg)}
+  nav{position:fixed;left:0;right:0;bottom:0;height:calc(58px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:flex;background:var(--card);border-top:1px solid var(--line);z-index:5}
+  nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--mute);text-decoration:none;font-size:11px}
+  nav a span{font-size:21px;line-height:1}
+  nav a.on{color:var(--blue)}
+  #boot{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg);z-index:10;padding:30px;text-align:center}
+  #boot img{width:84px;height:84px;border-radius:20px}
+  #boot .msg{color:var(--mute);font-size:14px;max-width:320px;line-height:1.5}
+  #boot progress{width:240px}
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(70px + env(safe-area-inset-bottom));background:#1d1f23;color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;display:none;z-index:20;max-width:90vw}
+</style>
+</head><body>
+<div id="boot"><img src="icons/icon-180.png" alt=""><b>JP Reader</b><div class="msg" id="bootMsg">Starting…</div><progress id="bootBar" hidden></progress></div>
+<iframe id="view" title="JP Reader"></iframe>
+<nav>
+  <a href="#books" data-tab="books"><span>📖</span>Books</a>
+  <a href="#video" data-tab="video"><span>🎬</span>Video</a>
+  <a href="#text" data-tab="text"><span>✍️</span>Text</a>
+  <a href="#learn" data-tab="learn"><span>⭐</span>Learn</a>
+  <a href="#settings" data-tab="settings"><span>⚙️</span>Settings</a>
+</nav>
+<div id="toast"></div>
+<script src="lib/kana.js"></script>
+<script src="lib/deinflect.js"></script>
+<script src="lib/archive.js"></script>
+<script src="lib/dictionary.js"></script>
+<script src="lib/tokenizer.js"></script>
+<script src="lib/frequency.js"></script>
+<script src="lib/shared.js"></script>
+<script src="lib/engine.js"></script>
+<script src="lib/jiten.js"></script>
+<script src="lib/recommend.js"></script>
+<script src="lib/settings.js"></script>
+<script src="lib/sync.js"></script>
+<script src="web/platform.js"></script>
+<script src="background.js"></script>
+<script src="web/shell.js"></script>
+</body></html>

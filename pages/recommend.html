@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta charset="utf-8">
+<script src="../web/frame-shim.js"></script><title>JP Reader — Recommendations</title><link rel="stylesheet" href="ui.css">
+<style>
+  .titles{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+  .t{display:flex;gap:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .t img{width:60px;height:86px;object-fit:cover;border-radius:6px;flex:none;background:var(--line)}
+  .t .nm{font-weight:700;font-size:15px;line-height:1.3}
+  .t .en{color:var(--mute);font-size:12px;margin-bottom:6px}
+  .meter{height:7px;border-radius:4px;background:var(--line);overflow:hidden;margin:6px 0 3px}
+  .meter i{display:block;height:100%}
+  .meta{color:var(--mute);font-size:12px}
+  .t .row{margin-top:8px}
+  .t .btn{padding:5px 10px;font-size:12.5px}
+  .big{font-size:28px;font-weight:800}
+  .stats{display:flex;gap:28px;flex-wrap:wrap}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  progress{width:100%;height:10px}
+  .sen{color:var(--mute);font-size:12.5px;max-width:320px}
+  td.rk{color:var(--mute);white-space:nowrap}
+</style><link rel="stylesheet" href="../web/frame.css"></head>
+<body><div class="wrap">
+  <h1>What should I read or watch next?</h1>
+  <p class="sub">Two ways to choose what to learn: the most common words you don't know yet (from your frequency list), and titles at your level. The title check runs popular anime, manga and novels on <a href="https://jiten.moe" target="_blank">Jiten.moe</a> against the words in your Anki, then ranks them by how much you'd understand.</p>
+
+  <div class="card" id="next"></div>
+
+  <div class="card">
+    <h2>Scan</h2>
+    <label class="f">Media</label>
+    <div class="chips" id="types"></div>
+    <div class="grid2">
+      <div><label class="f">Popular titles per type</label>
+        <select id="perType"><option>25</option><option selected>50</option><option>100</option><option>200</option></select></div>
+      <div><label class="f">Words checked per title <span class="hint">(more = more accurate, slower)</span></label>
+        <select id="pages"><option value="1">Top 200</option><option value="2">Top 400</option><option value="3">Top 600</option></select></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="scan">Scan titles</button><span id="scanMsg" class="hint"></span></div>
+    <progress id="prog" value="0" max="1" hidden></progress>
+  </div>
+
+  <div class="card">
+    <h2>Your level</h2>
+    <div class="chips" id="bands"></div>
+    <div class="row hint" style="margin-top:8px">Target coverage <input type="number" id="low" style="width:70px" min="50" max="100"> – <input type="number" id="high" style="width:70px" min="50" max="100"> %
+      &nbsp; About 90% is the usual immersion sweet spot; 98%+ is easy reading.</div>
+  </div>
+
+  <div id="out"></div>
+</div>
+<script src="api.js"></script>
+<script src="recommend.js"></script>
+</body></html>

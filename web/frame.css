@@ -1,0 +1,20 @@
+/* Phone-friendly tweaks for the shared pages when they run inside the app. */
+body{-webkit-text-size-adjust:100%}
+.wrap{padding:18px 14px calc(30px + env(safe-area-inset-bottom))}
+h1{font-size:22px}
+.btn{min-height:38px}
+input[type=text],input[type=number],select,textarea{font-size:16px} /* stops iOS zooming into fields */
+table{display:block;overflow-x:auto;white-space:nowrap}
+td{white-space:normal;min-width:70px}
+@media (max-width:600px){
+  .books{grid-template-columns:1fr!important}
+  .book img,.book .nocover{width:74px!important;height:106px!important}
+  .grid2{grid-template-columns:1fr}
+  .titles{grid-template-columns:1fr!important}
+  .chap{grid-template-columns:110px 1fr 46px!important}
+  .bar{overflow-x:auto;gap:6px!important;padding:0 8px!important}
+  .bar .t{display:none}
+  .bar select{max-width:140px!important}
+  .top{gap:6px!important}
+  .top .stats#names{display:none}
+}

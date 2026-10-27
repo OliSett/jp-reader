@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta charset="utf-8">
+<script src="../web/frame-shim.js"></script><title>JP Reader — Books</title><link rel="stylesheet" href="ui.css">
+<style>
+  body.reading{overflow:hidden}
+  .lib .wrap{max-width:1040px}
+  .books{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:14px}
+  .book{display:flex;gap:16px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .book img,.book .nocover{width:96px;height:138px;object-fit:cover;border-radius:8px;flex:none;background:linear-gradient(135deg,#d9cff6,#f3e6d6)}
+  .book .nocover{display:flex;align-items:center;justify-content:center;font-size:34px;color:#5b4b9a}
+  .book h3{margin:0;font-size:17px;line-height:1.35}
+  .book .au{color:var(--mute);font-size:13px;margin:2px 0 8px}
+  .cov{display:flex;align-items:baseline;gap:8px}.cov b{font-size:26px}
+  .meter{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:6px 0}
+  .meter i{display:block;height:100%;background:var(--green)}
+  .need{font-size:12.5px;color:var(--mute);line-height:1.6}
+  .book .row{margin-top:10px}.book .btn{padding:6px 11px;font-size:12.5px}
+  .detail{grid-column:1/-1}
+  .chap{display:grid;grid-template-columns:200px 1fr 50px;gap:10px;align-items:center;font-size:12.5px;margin:3px 0}
+  .chap .meter{margin:0}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:26px;text-align:center;color:var(--mute);margin-bottom:18px}
+  .drop.over{border-color:var(--blue);background:#3e8ef710}
+
+  /* reading view */
+  .bar{position:fixed;top:0;left:0;right:0;height:52px;display:flex;align-items:center;gap:8px;padding:0 14px;background:var(--card);border-bottom:1px solid var(--line);z-index:5}
+  .bar .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+  .bar select{width:auto;max-width:260px}
+  .bar .btn{padding:6px 10px}
+  .bar .sp{flex:1}
+  #page{position:fixed;top:52px;left:0;right:0;bottom:0;overflow:auto;background:#fbf8f2;color:#2b2a33}
+  @media (prefers-color-scheme:dark){#page{background:#1b1a22;color:#e6e2ee}}
+  #text{max-width:760px;margin:0 auto;padding:40px 28px 120px;font-family:"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP",serif;font-size:var(--fs,21px);line-height:1.95}
+  #text img,#text svg{max-width:100%;height:auto;display:block;margin:12px auto}
+  #text p{margin:0 0 .6em}
+  #text h1,#text h2,#text h3{font-family:inherit;margin:1.2em 0 .6em}
+  #text rt{font-size:.5em}
+  #text a{color:inherit}
+  #page.vertical #text{writing-mode:vertical-rl;max-width:none;height:calc(100vh - 52px - 60px);padding:30px 40px;margin:0}
+  #page.vertical #text img{max-height:80vh;width:auto}
+  #page.vertical #text p{margin:0 0 0 .6em}
+  .endnav{display:flex;justify-content:center;gap:12px;margin:30px 0}
+  #page.vertical .endnav{writing-mode:horizontal-tb;margin:0 30px}
+</style><link rel="stylesheet" href="../web/frame.css"></head>
+<body>
+<div id="app"></div>
+<script src="../lib/kana.js"></script>
+<script src="../lib/archive.js"></script>
+<script src="../lib/dictionary.js"></script>
+<script src="../lib/epub.js"></script>
+<script src="api.js"></script>
+<script src="../content/content.js"></script>
+<script src="reader.js"></script>
+</body></html>

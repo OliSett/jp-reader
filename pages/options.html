@@ -1,0 +1,115 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta charset="utf-8">
+<script src="../web/frame-shim.js"></script><title>JP Reader — Settings</title><link rel="stylesheet" href="ui.css"><link rel="stylesheet" href="../web/frame.css"></head>
+<body><div class="wrap">
+  <h1>JP Reader settings</h1>
+  <p class="sub">Three things to set up once: connect Anki, pick your Japanese decks, import the dictionary.</p>
+
+  <div class="card" id="checklist"></div>
+
+  <div class="card">
+    <h2>1 · Connect Anki</h2>
+    <p class="hint">Install the <b>AnkiConnect</b> add-on in Anki (Tools → Add-ons → Get Add-ons → code <b>2055492159</b>), restart Anki, and keep it open. The first time you connect, Anki shows a pop-up asking to allow this extension — click <b>Yes</b>.</p>
+    <div class="grid2">
+      <div><label class="f">AnkiConnect address</label><input type="text" id="ankiUrl"></div>
+      <div><label class="f">AnkiConnect API key <span class="hint">(only if you set one)</span></label><input type="password" id="ankiKey"></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="connect">Connect</button><span id="connStatus" class="status"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Your Japanese words</h2>
+    <label class="f">Decks that contain words you're learning <span class="hint">(click to select; subdecks are included)</span></label>
+    <div class="chips" id="decks"><span class="hint">Connect Anki first.</span></div>
+    <div class="row" style="margin-top:10px"><button class="btn g" id="detect">Show fields in these decks</button></div>
+    <pre id="fields" hidden></pre>
+    <div class="grid2">
+      <div><label class="f">Word field names <span class="hint">(first one found is used)</span></label><input type="text" id="wordFields"></div>
+      <div><label class="f">Reading field names <span class="hint">(optional, improves matching)</span></label><input type="text" id="readingFields"></div>
+      <div><label class="f">A card counts as <b>known</b> when its interval is at least (days)</label><input type="number" id="matureDays" min="1"></div>
+      <div><label class="f">Suspended cards count as</label>
+        <select id="suspended"><option value="known">Known</option><option value="learning">Learning</option><option value="ignore">Ignore them</option></select></div>
+    </div>
+    <label class="f"><input type="checkbox" id="countLearning"> Count words you're still learning as understood when working out coverage</label>
+  </div>
+
+  <div class="card">
+    <h2>3 · Dictionary (JMdict)</h2>
+    <p class="hint">Splits Japanese text into words, handles conjugations, and adds readings and meanings to your cards. Download the newest <b>jmdict-eng-…json.zip</b> (or .tgz) from
+      <a href="https://github.com/scriptin/jmdict-simplified/releases" target="_blank">jmdict-simplified releases</a> (a free, open-source export of JMdict) and choose it below. You only need to do this once.</p>
+    <div class="row"><input type="file" id="dictFile" accept=".zip,.tgz,.gz,.json"><span id="dictStatus" class="status"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>4 · Frequency list <span class="hint">(recommended)</span></h2>
+    <p class="hint">Ranks every word by how common it is, so you can learn the most useful words first. Download Jiten's list in one click, or import any
+      <b>Yomitan frequency dictionary</b> (.zip, e.g. JPDB, BCCWJ, Innocent Corpus) or a CSV/TSV word list sorted most-common-first.</p>
+    <div class="row"><button class="btn g" id="freqJiten">Download Jiten's frequency list</button><span class="hint">or</span><input type="file" id="freqFile" accept=".zip,.csv,.tsv,.txt,.json"></div>
+    <div id="freqStatus" class="status"></div>
+    <label class="f">Mark unknown words with ★ when they're in the top <input type="number" id="freqStar" min="0" step="1000" style="width:110px;display:inline-block"> most common words</label>
+  </div>
+
+  <div class="card" id="phoneCard">
+    <h2>📱 Phone (iPhone app)</h2>
+    <p class="hint">Use JP Reader on your phone: books, videos, highlighting and word lists, all with your Anki words. Cards you make on the phone are added to Anki here the next time Firefox syncs (every 5 minutes, while Anki is open).</p>
+    <div id="phoneBody"></div>
+  </div>
+
+  <div class="card">
+    <h2>New cards</h2>
+    <div class="grid2">
+      <div><label class="f">Deck for new cards</label><input type="text" id="targetDeck" list="deckList"><datalist id="deckList"></datalist></div>
+      <div><label class="f">Note type</label><select id="noteType"></select></div>
+    </div>
+    <div id="mapWrap" hidden>
+      <label class="f">Which field gets what <span class="hint">(leave blank to skip)</span></label>
+      <div class="grid2" id="fieldMap"></div>
+    </div>
+    <div class="grid2">
+      <div><label class="f">Tags</label><input type="text" id="tags"></div>
+      <div><label class="f">&nbsp;</label><label><input type="checkbox" id="allowDuplicates"> Allow duplicate cards</label></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Highlighting</h2>
+    <div class="grid2">
+      <div>
+        <label class="f">Colours</label>
+        <div class="row">
+          <label>Not in Anki <input type="color" id="c_unknown"></label>
+          <label>New <input type="color" id="c_new"></label>
+          <label>Learning <input type="color" id="c_learning"></label>
+          <label>Known <input type="color" id="c_known"></label>
+        </div>
+        <label class="f"><input type="checkbox" id="showKnown"> Also underline known words</label>
+        <label class="f"><input type="checkbox" id="watchPage"> Keep highlighting new text as it appears (subtitles, infinite scroll)</label>
+      </div>
+      <div><label class="f">Highlight automatically on these sites <span class="hint">(one URL fragment per line, e.g. syosetu.com)</span></label><textarea id="autoParse" style="min-height:110px"></textarea></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recommendations (Jiten.moe)</h2>
+    <p class="hint">Title lists and vocabulary come from Jiten.moe's free public API. A key is optional; it raises the rate limit so scans run about twice as fast (Jiten → Settings → Advanced → API key).</p>
+    <label class="f">Jiten API key <span class="hint">(optional)</span></label><input type="password" id="jitenKey">
+  </div>
+
+  <div class="row sticky"><button class="btn" id="save">Save &amp; sync</button><span id="saveStatus" class="status"></span></div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Diagnostics</h2>
+    <p class="hint">If recommendations come back empty, run this and send the output to whoever is helping you.</p>
+    <div class="row"><button class="btn g" id="testJiten">Test Jiten API</button></div>
+    <pre id="diag" hidden></pre>
+  </div>
+</div>
+<script src="../lib/kana.js"></script>
+<script src="../lib/archive.js"></script>
+<script src="../lib/dictionary.js"></script>
+<script src="../lib/frequency.js"></script>
+<script src="../lib/settings.js"></script>
+<script src="../lib/sync.js"></script>
+<script src="api.js"></script>
+<script src="options.js"></script>
+</body></html>

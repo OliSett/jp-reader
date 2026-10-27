@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta charset="utf-8">
+<script src="../web/frame-shim.js"></script><title>JP Reader — Bulk add</title><link rel="stylesheet" href="ui.css">
+<style>
+  td.w input{font-size:16px;min-width:90px}
+  td.m input{min-width:180px}
+  td.sen input{min-width:200px}
+  tr.done{opacity:.45}
+  .filters label{margin-right:12px}
+  td.rk{color:var(--mute);white-space:nowrap}
+</style><link rel="stylesheet" href="../web/frame.css"></head>
+<body><div class="wrap">
+  <h1>Bulk add cards</h1>
+  <p class="sub">Paste Japanese text (an episode's subtitles, a chapter, lyrics…) or a list of words, pick what you want and send it to Anki in one go.</p>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <label><input type="radio" name="mode" value="text" checked> Text — find the words in it</label>
+      <label><input type="radio" name="mode" value="list"> Word list — one word per line</label>
+    </div>
+    <textarea id="input" placeholder="ここに日本語のテキストを貼り付けてください…"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="go">Find words</button>
+      <span class="filters">Show:
+        <label><input type="checkbox" data-st="0" checked> Not in Anki</label>
+        <label><input type="checkbox" data-st="1"> New</label>
+        <label><input type="checkbox" data-st="2"> Learning</label>
+        <label><input type="checkbox" data-st="3"> Known</label>
+      </span>
+    </div>
+    <div id="msg" class="status"></div>
+  </div>
+
+  <div class="card" id="results" hidden>
+    <div class="row" style="justify-content:space-between">
+      <h2 id="count" style="margin:0"></h2>
+      <div class="row"><select id="sort" style="width:auto"><option value="count">Sort: most often in text</option><option value="rank">Sort: most common overall</option><option value="none">Sort: original order</option></select><button class="btn g" id="all">Select all</button><button class="btn g" id="none">None</button><button class="btn g" id="top">Top 20</button></div>
+    </div>
+    <table><thead><tr><th></th><th>Word</th><th>Reading</th><th>Meaning</th><th>Sentence</th><th>×</th><th>Rank</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table>
+    <div class="sticky">
+      <div class="grid2">
+        <div><label class="f">Deck</label><input type="text" id="deck"></div>
+        <div><label class="f">Source <span class="hint">(saved on the card)</span></label><input type="text" id="source" value="Pasted text"></div>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="btn" id="add" disabled>Add to Anki</button><button class="btn g" id="known" disabled>Mark known</button><span id="addMsg" class="status"></span></div>
+      <div id="noSent" class="hint"></div>
+    </div>
+  </div>
+</div>
+<script src="api.js"></script>
+<script src="bulk.js"></script>
+</body></html>
