@@ -1,6 +1,8 @@
 /* Video player with Japanese subtitles highlighted by what you know. */
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), transcript = $('transcript');
+// iPhone's file picker doesn't know .srt/.ass, so a type filter greys them out: accept any file and check it ourselves
+if (JA.platform === 'web' || /iPhone|iPad|iPod/.test(navigator.userAgent)) $('sfile').removeAttribute('accept');
 let cues = [], cueEls = [], cur = -1, offset = 0, autoPause = false, pausedAt = -1, showSubs = true;
 let videoName = '', subName = '', userScrollAt = 0;
 
@@ -42,10 +44,14 @@ $('sfile').onchange = async e => {
   const buf = await f.arrayBuffer();
   let text = new TextDecoder('utf-8').decode(buf);
   if (text.includes('�')) { try { text = new TextDecoder('shift_jis').decode(buf); } catch { /* keep utf-8 */ } }
+  if (f.type.startsWith('video/') || f.type.startsWith('image/') || /\.(mp4|mkv|mov|webm|m4v|jpe?g|png|heic)$/i.test(f.name)) {
+    $('cov').textContent = `“${f.name}” isn't a subtitle file. Choose an .srt, .vtt or .ass file.`;
+    return;
+  }
   cues = JA.subs.parse(text, f.name);
   subName = f.name;
   showNames();
-  if (!cues.length) { $('cov').textContent = 'No subtitle lines found in that file.'; return; }
+  if (!cues.length) { $('cov').textContent = `No subtitle lines found in “${f.name}”. Is it an .srt, .vtt or .ass file?`; return; }
   buildTranscript();
   const st = (await loadState())[videoName || subName];
   if (st && st.offset && !videoName) setOffset(st.offset);
