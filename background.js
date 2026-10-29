@@ -169,56 +169,88 @@
 
   async function doPhoneSync() {
     S.phone.busy = true;
+    const errors = [];
+    const seen = S.phone.seen || (S.phone.seen = {});
     try {
-      const remote = Object.fromEntries((await JA.sync.get(['words', 'shared'])).map(r => [r.kind, r]));
-      // shared: marked-known words, saved sentences (both directions)
-      const { manualKnown } = await store.get('manualKnown');
-      const mine = { manualKnown: manualKnown || [], sentenceBank: E.bank, settings: null, settingsAt: 0 };
-      const m = JA.shared.merge(mine, remote.shared ? remote.shared.data : JA.shared.empty());
-      E.bank = m.sentenceBank;
-      E.know.manual = new Set(m.manualKnown);
-      await store.set({ manualKnown: m.manualKnown, sentenceBank: E.bank });
-      await JA.sync.put('shared', { manualKnown: m.manualKnown, sentenceBank: m.sentenceBank, updatedAt: Date.now() });
+      // what changed on the server since we last looked (tiny request)
+      const times = Object.fromEntries((await JA.sync.times()).map(r => [r.kind, r.updated_at]));
+      const need = ['words', 'shared'].filter(k => times[k] && times[k] !== seen[k]);
+      const remote = need.length ? Object.fromEntries((await JA.sync.get(need)).map(r => [r.kind, r])) : {};
 
-      if (WEB) {
-        // phone: take the Anki word list the extension published
-        if (remote.words && (!S.lastSync || new Date(remote.words.updated_at).getTime() > S.lastSync)) {
-          const local = S.words.filter(w => w.status === JA.ST.NEW && w.local); // queued here, not yet in the snapshot
-          S.words = JA.sync.unpackWords(remote.words.data.words);
-          const have = new Set(S.words.map(w => w.word));
-          for (const w of local) if (!have.has(w.word)) S.words.push(w);
-          S.lastSync = new Date(remote.words.updated_at).getTime();
-          await store.set({ ankiWords: S.words, lastSync: S.lastSync });
-        }
-        E.know.build(S.words, m.manualKnown);
-        S.phone.pending = 0;
-      } else {
-        // Firefox: publish the Anki word list, then add cards mined on the phone
-        if (S.words.length && (!remote.words || (S.lastSync && S.lastSync > new Date(remote.words.updated_at).getTime()))) {
-          await JA.sync.put('words', { words: JA.sync.packWords(S.words), at: S.lastSync });
-        }
-        const pending = await JA.sync.queuePending();
-        S.phone.pending = pending.length;
-        if (pending.length && S.ankiOk) {
-          const r = await JA.anki.addCards(pending.map(p => p.item), S.settings);
-          const done = pending.filter(p => r.addedItems.includes(p.item) || r.failed.some(f => f.word === p.item.word && /duplicate/i.test(f.reason))).map(p => p.id);
-          if (done.length) await JA.sync.queueDone(done);
-          for (const it of r.addedItems) { E.know.setStatus(it.word, it.reading, JA.ST.NEW); S.words.push({ word: it.word, reading: it.reading, status: JA.ST.NEW }); }
-          if (r.added) await store.set({ ankiWords: S.words });
-          S.phone.fromPhone = (S.phone.fromPhone || 0) + r.added;
-          S.phone.pending = pending.length - done.length;
-        }
+      // 1. cards made on the phone -> Anki (Firefox), first, so nothing else can hold them up
+      if (!WEB) {
+        try {
+          const pending = await JA.sync.queuePending();
+          S.phone.pending = pending.length;
+          if (pending.length && S.ankiOk) {
+            for (let i = 0; i < pending.length; i += 100) {
+              const part = pending.slice(i, i + 100);
+              const r = await JA.anki.addCards(part.map(p => p.item), S.settings);
+              const added = new Set(r.addedItems);
+              const dupes = new Set(r.failed.filter(f => /duplicate/i.test(f.reason)).map(f => f.word));
+              const done = part.filter(p => added.has(p.item) || dupes.has(p.item.word)).map(p => p.id);
+              if (done.length) await JA.sync.queueDone(done);
+              for (const it of r.addedItems) { E.know.setStatus(it.word, it.reading, JA.ST.NEW); S.words.push({ word: it.word, reading: it.reading, status: JA.ST.NEW }); }
+              S.phone.fromPhone = (S.phone.fromPhone || 0) + r.added;
+              S.phone.pending -= done.length;
+            }
+            await store.set({ ankiWords: S.words });
+            S.lastSync = Date.now(); // the word list changed: publish it below
+          }
+        } catch (e) { errors.push('cards: ' + e.message); }
       }
-      S.phone.at = Date.now(); S.phone.error = '';
+
+      // 2. the Anki word list (Firefox publishes, phone reads)
+      try {
+        if (WEB) {
+          if (remote.words) {
+            const local = S.words.filter(w => w.status === JA.ST.NEW && w.local); // queued here, not yet in Anki
+            S.words = JA.sync.unpackWords(remote.words.data.words);
+            const have = new Set(S.words.map(w => w.word));
+            for (const w of local) if (!have.has(w.word)) S.words.push(w);
+            S.lastSync = new Date(remote.words.updated_at).getTime();
+            seen.words = remote.words.updated_at;
+            await store.set({ ankiWords: S.words, lastSync: S.lastSync });
+          }
+          S.phone.pending = 0;
+        } else if (S.words.length && (!times.words || (S.lastSync && S.lastSync > new Date(times.words).getTime()))) {
+          seen.words = await JA.sync.put('words', { words: JA.sync.packWords(S.words.filter(w => !w.local)), at: S.lastSync });
+        } else if (remote.words) seen.words = remote.words.updated_at;
+      } catch (e) { errors.push('words: ' + e.message); }
+
+      // 3. marked-known words and saved sentences (both ways), compressed, only uploaded when changed
+      try {
+        const { manualKnown } = await store.get('manualKnown');
+        let mk = manualKnown || [];
+        if (remote.shared) {
+          const r = await JA.sync.unpackShared(remote.shared.data);
+          const m = JA.shared.merge({ manualKnown: mk, sentenceBank: E.bank }, { manualKnown: r.manualKnown, sentenceBank: r.sentenceBank });
+          E.bank = m.sentenceBank; mk = m.manualKnown;
+          seen.shared = remote.shared.updated_at;
+          await store.set({ manualKnown: mk, sentenceBank: E.bank });
+        }
+        E.know.manual = new Set(mk);
+        const packed = await JA.sync.packShared(mk, E.bank);
+        const hash = await JA.sync.digest(packed.json);
+        if (hash !== S.phone.sharedHash) {
+          seen.shared = await JA.sync.put('shared', packed.data);
+          S.phone.sharedHash = hash;
+        }
+      } catch (e) { errors.push('sentences: ' + e.message); }
+
+      if (WEB) E.know.build(S.words, [...E.know.manual]);
+      S.phone.at = Date.now();
+      S.phone.error = errors.join(' · ');
       broadcast({ type: 'jar-statuses-changed' });
     } catch (e) {
       S.phone.error = e.message;
     } finally {
       S.phone.busy = false;
-      store.set({ phoneSync: { at: S.phone.at, error: S.phone.error, fromPhone: S.phone.fromPhone } });
+      store.set({ phoneSync: { at: S.phone.at, error: S.phone.error, fromPhone: S.phone.fromPhone, seen: S.phone.seen, sharedHash: S.phone.sharedHash } });
     }
     return summary();
   }
+
 
   async function markKnown(keys, on = true) {
     for (const k of keys) on ? E.know.manual.add(k) : E.know.manual.delete(k);
@@ -332,6 +364,7 @@
       await store.set({ settings: S.settings });
       configure();
       S.lastSync = WEB ? null : S.lastSync;
+      S.phone.seen = {}; S.phone.sharedHash = null;
       if (k) await phoneSync(); else S.phone = { at: null, error: '', busy: false, pending: 0, fromPhone: 0 };
       return summary();
     },
