@@ -20,13 +20,18 @@
   };
   JA.bg = S;
   const store = browser.storage.local;
-  const WEB = JA.platform === 'web'; // the phone app: no Anki, words come from the extension via sync
+  // phone app ('web') and the Safari/iPhone extension ('safari'): no Anki, words come from Firefox via sync
+  const WEB = JA.platform === 'web' || JA.platform === 'safari';
 
   async function init() {
     S.settings = await JA.loadSettings();
     configure();
     try { const c = await JA.dict.idbGet('jmdict'); if (c) E.dict.load(c); } catch (e) { console.warn('dictionary load failed', e); }
     try { const f = await JA.dict.idbGet('freq'); if (f) E.freq.load(f); } catch (e) { console.warn('frequency load failed', e); }
+    if (JA.platform === 'safari' && (!E.dict.loaded || !E.freq.loaded)) {
+      // first start on the iPhone: fetch the lite dictionary + frequency list once
+      try { await JA.safariData.ensure(E); } catch (e) { S.dataError = e.message; }
+    }
     const saved = await store.get(['ankiWords', 'lastSync', 'manualKnown', 'jitenScan', 'sentenceBank']);
     S.words = saved.ankiWords || [];
     S.lastSync = saved.lastSync || null;
@@ -37,6 +42,11 @@
     if (ph.phoneSync) S.phone = { ...S.phone, ...ph.phoneSync, busy: false };
     refreshAnki().catch(() => {}); // silent; Anki may be closed
     setInterval(() => phoneSync().catch(() => {}), WEB ? 2 * 60e3 : 5 * 60e3);
+    if (JA.platform === 'safari' && browser.alarms) {
+      // Safari may stop the background page between uses: an alarm wakes it to sync
+      browser.alarms.create('jp-sync', { periodInMinutes: 5 });
+      browser.alarms.onAlarm.addListener(a => { if (a.name === 'jp-sync') phoneSync().catch(() => {}); });
+    }
   }
 
   function configure() {
@@ -113,7 +123,7 @@
       sentences: Object.keys(E.bank).length,
       lastSync: S.lastSync, ankiOk: S.ankiOk, ankiError: S.ankiError, syncing: S.syncing, syncProgress: S.syncProgress, sharedAt: S.sharedAt,
       scan: { ...S.scan, titles: S.scanned.length },
-      platform: WEB ? 'web' : 'extension',
+      platform: JA.platform || 'extension', dataError: S.dataError || '', dataProgress: JA.safariData ? JA.safariData.progress : '',
       phone: { ...S.phone, enabled: JA.sync.enabled() },
     };
   }
@@ -377,9 +387,32 @@
       broadcast({ type: 'jar-statuses-changed' });
       return summary();
     },
+    async retryData() { S.dataError = ''; await JA.safariData.ensure(E, true); return summary(); },
     async reloadFrequency() { const f = await JA.dict.idbGet('freq'); if (f) E.freq.load(f); broadcast({ type: 'jar-statuses-changed' }); return summary(); },
     downloadJitenFrequency: () => downloadJitenFrequency(),
     tokenize: ({ texts }) => E.tokenizeTexts(texts),
+    // ---- subtitles on other websites: find the frame with the video, open the side panel in the page
+    async subsStart(msg, sender) {
+      const tabId = msg.tabId || (sender.tab && sender.tab.id);
+      if (tabId === undefined) throw new Error('No tab');
+      const nonce = Math.random().toString(36).slice(2);
+      const found = [];
+      subsProbes.set(nonce, found);
+      await browser.tabs.sendMessage(tabId, { type: 'jar-subs-probe', nonce }).catch(() => {});
+      await new Promise(r => setTimeout(r, 500));
+      subsProbes.delete(nonce);
+      found.sort((a, b) => b.area - a.area);
+      const videoFrame = found.length ? found[0].frameId : null;
+      if (videoFrame !== null) await browser.tabs.sendMessage(tabId, { type: 'jar-subs-attach' }, { frameId: videoFrame }).catch(() => {});
+      await browser.tabs.sendMessage(tabId, { type: 'jar-subs-sidebar', videoFrame }, { frameId: 0 });
+      return { videoFrame, frames: found.length };
+    },
+    subsHasVideo(msg, sender) { const f = subsProbes.get(msg.nonce); if (f) f.push({ frameId: sender.frameId || 0, area: msg.area }); return true; },
+    async subsRelay(msg, sender) {
+      if (!sender.tab) throw new Error('No tab');
+      await browser.tabs.sendMessage(sender.tab.id, msg.msg, { frameId: msg.to || 0 });
+      return true;
+    },
     statuses: ({ keys }) => Object.fromEntries(keys.map(k => [k, statusForKey(k)])),
     addCards: ({ items }) => addCards(items),
     markKnown: ({ keys, on }) => markKnown(keys, on),
@@ -402,12 +435,13 @@
     jitenScanStatus: () => ({ ...S.scan, titles: S.scanned.length }),
     recommendations: (o) => recommendations(o),
   };
+  const subsProbes = new Map();
   JA.handlers = H;
 
-  browser.runtime.onMessage.addListener((msg) => {
+  browser.runtime.onMessage.addListener((msg, sender) => {
     const h = msg && H[msg.type];
     if (!h) return undefined;
-    return S.ready.then(() => h(msg)).then(r => ({ ok: true, r }), e => ({ ok: false, error: e.message || String(e) }));
+    return S.ready.then(() => h(msg, sender || {})).then(r => ({ ok: true, r }), e => ({ ok: false, error: e.message || String(e) }));
   });
 
   if (browser.commands && browser.commands.onCommand) {

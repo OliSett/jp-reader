@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script src="../web/frame-shim.js"></script><title>JP Reader — Settings</title>
+<link rel="stylesheet" href="ui.css">
+<style>.wrap{padding:18px 14px 40px;max-width:640px}input[type=text]{font-size:16px}.btn{min-height:38px}</style><link rel="stylesheet" href="../web/frame.css"></head>
+<body><div class="wrap">
+  <h1>JP Reader</h1>
+  <p class="sub">Safari extension for iPhone: highlights Japanese on any site and shows your own subtitles on any video. Your words come from Anki through the Firefox extension.</p>
+  <div class="card"><h2>🔗 Link with Firefox</h2><div id="link"></div></div>
+  <div class="card"><h2>📚 Word data</h2><div id="data"></div></div>
+  <div class="card"><h2>How to use</h2>
+    <ul class="hint" style="padding-left:18px;line-height:1.7">
+      <li>In Safari, tap the <b>ᴀA</b> (or puzzle) button in the address bar → <b>JP Reader</b>.</li>
+      <li><b>Highlight this page</b> colours Japanese words; tap a word for its meaning and to make a card.</li>
+      <li><b>Subtitles for this page's video</b>: start the video, then open your .srt/.vtt/.ass file in the panel. Use <b>Big video</b> instead of the player's fullscreen: iPhone's own fullscreen player can't show extra subtitles.</li>
+      <li>Cards you make are added to Anki by Firefox on its next sync.</li>
+    </ul>
+  </div>
+</div>
+<script src="../lib/kana.js"></script>
+<script src="../lib/sync.js"></script>
+<script src="api.js"></script>
+<script src="safari-settings.js"></script>
+</body></html>

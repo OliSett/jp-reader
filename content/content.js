@@ -3,6 +3,7 @@
 (() => {
   if (window.__jarLoaded) return;
   window.__jarLoaded = true;
+  const TOP = window === window.top; // the script also runs inside embedded video players (iframes)
 
   const ST = ['unknown', 'new', 'learning', 'known', 'known'];
   const ST_LABEL = ['Not in Anki', 'In Anki (new)', 'Learning', 'Known', 'Marked known'];
@@ -69,7 +70,7 @@
       acceptNode(n) {
         if (!n.nodeValue || !JP.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
         for (let p = n.parentElement; p; p = p.parentElement) {
-          if (SKIP_TAGS.has(p.tagName) || p.isContentEditable || p.classList.contains('jar-w') || p.id === 'jar-host') return NodeFilter.FILTER_REJECT;
+          if (SKIP_TAGS.has(p.tagName) || p.isContentEditable || p.classList.contains('jar-w') || p.id === 'jar-host' || p.hasAttribute('data-jar-own')) return NodeFilter.FILTER_REJECT;
           if (p === root) break;
         }
         return NodeFilter.FILTER_ACCEPT;
@@ -121,7 +122,7 @@
   }
 
   let tokenSeq = 0;
-  async function processNodes(nodes) {
+  async function processNodes(nodes, opts = {}) {
     const segs = segments(nodes.filter(n => n.isConnected));
     let i = 0;
     while (i < segs.length) {
@@ -141,16 +142,16 @@
             if (e <= part.start || s >= part.end) return;
             pieces.push([Math.max(s, part.start) - part.start, Math.min(e, part.end) - part.start, key, s >= part.start, (s < part.start || e > part.end) ? tids[ti] : 0]);
           });
-          wrap(part.node, pieces);
+          wrap(part.node, pieces, opts.noCount);
         }
       });
       renderPanel();
-      bankNewSentences();
+      if (!opts.noCount) bankNewSentences();
     }
   }
 
   /** pieces: [start, end, key, isFirstPieceOfWord] within this text node */
-  function wrap(node, pieces) {
+  function wrap(node, pieces, noCount) {
     if (!pieces.length || !node.parentNode) return;
     const text = node.nodeValue;
     const frag = document.createDocumentFragment();
@@ -164,7 +165,7 @@
       if (tid) sp.dataset.t = tid;
       sp.textContent = text.slice(s, e);
       frag.appendChild(sp);
-      if (head) { w.count++; if (!w.el) w.el = sp; }
+      if (head && !noCount) { w.count++; if (!w.el) w.el = sp; }
       if (!spans.has(key)) spans.set(key, new Set());
       spans.get(key).add(sp);
       pos = e;
@@ -213,8 +214,8 @@
       let pending = new Set(), timer = null;
       observer = new MutationObserver(muts => {
         for (const m of muts) for (const n of m.addedNodes) {
-          if (n.nodeType === 3) { if (n.parentElement && !n.parentElement.closest('.jar-w,#jar-host')) pending.add(n); }
-          else if (n.nodeType === 1 && !n.closest('#jar-host') && !n.classList.contains('jar-w')) textNodes(n).forEach(t => pending.add(t));
+          if (n.nodeType === 3) { if (n.parentElement && !n.parentElement.closest('.jar-w,#jar-host,[data-jar-own]')) pending.add(n); }
+          else if (n.nodeType === 1 && !n.closest('#jar-host,[data-jar-own]') && !n.classList.contains('jar-w')) textNodes(n).forEach(t => pending.add(t));
         }
         if (pending.size && !timer) timer = setTimeout(() => {
           const list = [...pending].filter(t => t.isConnected && !(t.parentElement && t.parentElement.closest('.jar-w')));
@@ -361,6 +362,7 @@
 
   function buildUI() {
     if (ui) return;
+    if (!settings) { settings = { colors: {}, targetDeck: 'Japanese' }; loadSettings().then(renderPanel).catch(() => {}); }
     const host = document.createElement('div');
     host.id = 'jar-host';
     const root = host.attachShadow({ mode: 'open' });
@@ -386,6 +388,10 @@
     const $ = s => root.querySelector(s);
     ui = { host, root, $, status: $('.status'), list: $('.list'), tip: $('.tip'), filter: 0, sort: 'page' };
     if (innerWidth <= 600) $('.panel').classList.add('min');
+    if (!TOP) $('.panel').style.display = 'none'; // inside an embedded player only the word popup is used
+    // phone showing a site's desktop layout: scale the popup and panel back to a readable size
+    if (matchMedia('(pointer: coarse)').matches && innerWidth > screen.width * 1.2) host.style.zoom = String(innerWidth / screen.width);
+    placeHost();
     $('.hd').addEventListener('click', e => { if (!e.target.classList.contains('x')) $('.panel').classList.toggle('min'); });
     $('.x').addEventListener('click', clearPage);
     root.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
@@ -515,6 +521,7 @@
 
   // ---------- messages ----------
   browser.runtime.onMessage.addListener(msg => {
+    if (!TOP && /^jar-(toggle|parse|clear|is-active|page-text)$/.test(msg.type)) return undefined;
     if (msg.type === 'jar-toggle') { active ? clearPage() : parsePage(); return Promise.resolve({ active: !active }); }
     if (msg.type === 'jar-parse') { if (!active) parsePage(); return Promise.resolve({ active: true }); }
     if (msg.type === 'jar-clear') { clearPage(); return Promise.resolve({ active: false }); }
@@ -523,15 +530,27 @@
       const root = document.querySelector('article, main, [role=main]') || document.body;
       return Promise.resolve({ title: document.title, url: location.href, text: blockTextDeep(root) });
     }
-    if (msg.type === 'jar-statuses-changed') { if (active) refreshStatuses().catch(() => {}); }
+    if (msg.type === 'jar-statuses-changed') { if (active || words.size) refreshStatuses().catch(() => {}); }
     if (msg.type === 'jar-settings-changed') { loadSettings().then(() => renderPanel()); }
     return undefined;
   });
 
   // auto-parse on listed sites
   loadSettings().then(() => {
-    if ((settings.autoParse || []).some(p => p && location.href.includes(p))) parsePage();
+    if (TOP && (settings.autoParse || []).some(p => p && location.href.includes(p))) parsePage();
   }).catch(() => {});
 
-  window.__jar = { parsePage, clearPage, words, refreshStatuses };
+  // in fullscreen only the fullscreen element is drawn: keep the word popup inside it
+  function placeHost() {
+    if (!ui) return;
+    const fs = document.fullscreenElement;
+    const parent = fs && fs.tagName !== 'VIDEO' && fs.tagName !== 'IFRAME' ? fs : document.documentElement;
+    if (ui.host.parentNode !== parent) parent.appendChild(ui.host);
+  }
+  document.addEventListener('fullscreenchange', placeHost);
+
+  window.__jar = {
+    parsePage, clearPage, words, spans, refreshStatuses, processNodes, buildUI, hideTip, renderPanel, send, h, TOP,
+    ui: () => ui, panelOffset: px => { if (ui) ui.$('.panel').style.right = (14 + px) + 'px'; },
+  };
 })();
