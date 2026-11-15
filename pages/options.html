@@ -68,7 +68,14 @@
     <div class="grid2">
       <div><label class="f">Tags</label><input type="text" id="tags"></div>
       <div><label class="f">&nbsp;</label><label><input type="checkbox" id="allowDuplicates"> Allow duplicate cards</label></div>
+      <div><label class="f">&nbsp;</label><label><input type="checkbox" id="pitchAccent"> Pitch-accent graph on cards</label></div>
+      <div><label class="f">&nbsp;</label><label><input type="checkbox" id="wordAudio"> Audio of the word on cards</label></div>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>🤖 AI meanings</h2>
+    <div id="ai"></div>
   </div>
 
   <div class="card">
@@ -109,6 +116,7 @@
 <script src="../lib/dictionary.js"></script>
 <script src="../lib/frequency.js"></script>
 <script src="../lib/settings.js"></script>
+<script src="ai-settings.js"></script>
 <script src="../lib/sync.js"></script>
 <script src="api.js"></script>
 <script src="options.js"></script>

@@ -30,7 +30,12 @@ JA.platform = 'web';
 
   async function dispatchBg(msg) {
     const m = clone(msg);
-    for (const f of bgListeners) { const r = f(m, {}); if (r !== undefined) return clone(await r); }
+    for (const f of bgListeners) {
+      let reply; const replied = new Promise(res => { reply = res; });
+      const r = f(m, {}, v => reply(v));
+      if (r === true) return clone(await replied);
+      if (r !== undefined) return clone(await r);
+    }
     return undefined;
   }
   async function dispatchFrame(id, msg) {

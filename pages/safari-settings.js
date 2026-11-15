@@ -3,7 +3,13 @@ const codeFrom = v => { const m = String(v || '').match(/JPR-[A-Z0-9-]{20,}/i); 
 
 async function render() {
   let st;
-  try { st = await bg('getState'); } catch (e) { $('link').textContent = e.message; return; }
+  try { st = await bg('getState'); }
+  catch (e) {
+    $('link').replaceChildren(h('p', null, e.message), h('p', { class: 'hint' }, await bgDiag()));
+    $('data').replaceChildren(h('p', { class: 'hint' }, 'Waiting for the extension to start…'));
+    setTimeout(render, 2000);
+    return;
+  }
   const key = st.settings.syncKey, ph = st.phone || {};
   if (!key) {
     const input = h('input', { type: 'text', placeholder: 'JPR-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX', autocapitalize: 'characters', autocomplete: 'off', spellcheck: false });
@@ -28,7 +34,7 @@ async function render() {
   }
   $('data').replaceChildren(
     h('p', { class: 'hint' },
-      st.dict ? `Dictionary: ${st.dict.entries.toLocaleString()} common words` : (st.dataProgress || 'Dictionary: downloading on first start…'), ' · ',
+      st.dict ? `Dictionary: ${st.dict.entries.toLocaleString()} common words` : (st.dataProgress || 'Dictionary: loading…'), ' · ',
       st.freq ? `Frequency list: ${st.freq.entries.toLocaleString()} words` : ''),
     st.dataError ? h('p', null, h('span', { class: 'bad' }, st.dataError), ' ', h('button', { class: 'btn g', onclick: async () => { say($('data'), 'Downloading…'); try { await bg('retryData'); } catch (e) { /* shown below */ } render(); } }, 'Try again')) : null);
   if (!st.dict && !st.dataError) setTimeout(render, 1500);

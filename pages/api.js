@@ -4,6 +4,15 @@ window.bg = (type, data = {}) => browser.runtime.sendMessage({ type, ...data }).
   if (!res.ok) throw new Error(res.error);
   return res.r;
 });
+// what the background last reported (stored, so it can be read even when it doesn't answer)
+window.bgDiag = async () => {
+  try {
+    const { bgStatus: b } = await browser.storage.local.get('bgStatus');
+    if (!b) return 'The background has never started. Try closing Safari completely (swipe it away) and opening it again.';
+    const ago = Math.round((Date.now() - b.at) / 1000);
+    return `Background: ${b.stage}${b.error ? ' — ' + b.error : ''} (${ago < 120 ? ago + ' s' : Math.round(ago / 60) + ' min'} ago)`;
+  } catch (e) { return 'Storage unavailable: ' + e.message; }
+};
 window.ST_LABEL = ['Not in Anki', 'New in Anki', 'Learning', 'Known', 'Marked known'];
 
 /** Build DOM safely (text is always inserted as text, never parsed as HTML).

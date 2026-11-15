@@ -20,17 +20,19 @@
   };
   JA.bg = S;
   const store = browser.storage.local;
+  S.dataReady = Promise.resolve();
+  // last background state, readable by the extension pages even when the background can't answer
+  function status(stage, error) { store.set({ bgStatus: { stage, error: error || '', at: Date.now() } }).catch(() => {}); }
+  JA.bgStatus = (m) => status(m);
   // phone app ('web') and the Safari/iPhone extension ('safari'): no Anki, words come from Firefox via sync
   const WEB = JA.platform === 'web' || JA.platform === 'safari';
 
   async function init() {
     S.settings = await JA.loadSettings();
     configure();
-    try { const c = await JA.dict.idbGet('jmdict'); if (c) E.dict.load(c); } catch (e) { console.warn('dictionary load failed', e); }
-    try { const f = await JA.dict.idbGet('freq'); if (f) E.freq.load(f); } catch (e) { console.warn('frequency load failed', e); }
-    if (JA.platform === 'safari' && (!E.dict.loaded || !E.freq.loaded)) {
-      // first start on the iPhone: fetch the lite dictionary + frequency list once
-      try { await JA.safariData.ensure(E); } catch (e) { S.dataError = e.message; }
+    if (JA.platform !== 'safari') {
+      try { const c = await JA.dict.idbGet('jmdict'); if (c) E.dict.load(c); } catch (e) { console.warn('dictionary load failed', e); }
+      try { const f = await JA.dict.idbGet('freq'); if (f) E.freq.load(f); } catch (e) { console.warn('frequency load failed', e); }
     }
     const saved = await store.get(['ankiWords', 'lastSync', 'manualKnown', 'jitenScan', 'sentenceBank']);
     S.words = saved.ankiWords || [];
@@ -40,6 +42,11 @@
     E.know.build(S.words, saved.manualKnown || []);
     const ph = await store.get('phoneSync');
     if (ph.phoneSync) S.phone = { ...S.phone, ...ph.phoneSync, busy: false };
+    if (JA.platform === 'safari') {
+      // iPhone: the word data ships inside the app; load it without holding up settings/sync messages
+      S.dataReady = JA.safariData.ensure(E).then(() => status('ready'), e => { S.dataError = e.message; status('data error', e.message); });
+    }
+    if (!WEB) await loadPitch();
     refreshAnki().catch(() => {}); // silent; Anki may be closed
     setInterval(() => phoneSync().catch(() => {}), WEB ? 2 * 60e3 : 5 * 60e3);
     if (JA.platform === 'safari' && browser.alarms) {
@@ -53,6 +60,72 @@
     if (JA.anki) JA.anki.configure({ url: S.settings.ankiUrl, key: S.settings.ankiKey });
     JA.jiten.configure({ key: S.settings.jitenKey });
     JA.sync.configure({ syncKey: S.settings.syncKey });
+  }
+
+  // ---------- AI: what a word means in this sentence (and whether it's a word at all) ----------
+  const AI_SYSTEM = `You help a learner reading Japanese. A tool cut a piece of text out of a sentence as one word and guessed its dictionary entry.
+Decide whether the highlighted text, exactly as cut, is a real word here (an inflected form counts).
+It is NOT valid when it is only part of a longer word or name (e.g. 和 inside the name 和真, 一歳 inside 二一歳) or when it joins pieces of two different words (e.g. よカ in よカズマ).
+Reply with JSON only, no other text:
+{"valid": true or false, "word": "dictionary form", "reading": "hiragana", "meaning": "short English meaning as used in this sentence, max 12 words", "note": "optional nuance or grammar note, max 15 words, or empty", "part_of": "if not valid: the real word or name it belongs to, else empty"}`;
+  const aiCache = new Map();
+  async function aiExplain({ word, reading, surface, sentence, gloss }) {
+    const s = S.settings;
+    if (!s.aiKey) throw new Error('Add an Anthropic API key in Settings to get AI meanings.');
+    const ck = sentence + '\u0000' + surface;
+    if (aiCache.has(ck)) return aiCache.get(ck);
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': s.aiKey.trim(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: s.aiModel || 'claude-haiku-5-5', max_tokens: 400, system: AI_SYSTEM,
+        messages: [{ role: 'user', content: `Sentence: ${sentence}\nHighlighted text: ${surface}\nDictionary guess: ${word}${reading ? `（${reading}）` : ''} — ${String(gloss || '').slice(0, 200)}` }],
+      }),
+    });
+    if (!res.ok) {
+      let msg = ''; try { msg = (await res.json()).error.message; } catch { /* not json */ }
+      throw new Error(res.status === 401 ? 'The Anthropic API key was not accepted — check it in Settings.' : `AI request failed (${res.status}) ${msg}`.trim());
+    }
+    const j = await res.json();
+    const text = (j.content || []).map(c => c.text || '').join('');
+    let r;
+    try { r = JSON.parse(text.match(/\{[\s\S]*\}/)[0]); } catch { throw new Error('The AI answer could not be read.'); }
+    const out = { valid: r.valid !== false, word: r.word || word, reading: r.reading || '', meaning: r.meaning || '', note: r.note || '', partOf: r.part_of || '' };
+    aiCache.set(ck, out);
+    if (aiCache.size > 1000) aiCache.delete(aiCache.keys().next().value);
+    return out;
+  }
+
+  // ---------- pitch accent + word audio on cards ----------
+  async function loadPitch() {
+    try {
+      const res = await fetch(browser.runtime.getURL('data/pitch.json.gz'));
+      JA.pitch.load(JSON.parse(await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).text()));
+    } catch (e) { console.warn('pitch data failed to load', e); }
+  }
+  S.enrich = { running: false, done: 0, total: 0, pitch: 0, audio: 0, error: '' };
+  /** Fill in pitch graphs and word audio on cards that don't have them yet (runs after each Anki sync). */
+  async function enrichCards() {
+    if (WEB || S.enrich.running) return;
+    S.enrich = { running: true, done: 0, total: 0, pitch: 0, audio: 0, error: '' };
+    try {
+      const t = (await store.get('enrichTried')).enrichTried || {};
+      const tried = { pitch: new Set(t.pitch || []), audio: new Set(t.audio || []) };
+      const s = { ...S.settings };
+      if (s.wordAudio !== false) {
+        // Anki downloads the clips itself; skip this round if the audio site can't be reached
+        try { await fetch(JA.anki.audioFor('猫', 'ねこ', 'Audio').url, { mode: 'no-cors', cache: 'no-store' }); } catch { s.wordAudio = false; }
+      }
+      let lastSave = Date.now();
+      const save = () => store.set({ enrichTried: { pitch: [...tried.pitch], audio: [...tried.audio] } });
+      const r = await JA.anki.fillPitchAudio(s, tried, p => {
+        Object.assign(S.enrich, p);
+        if (Date.now() - lastSave > 10e3) { lastSave = Date.now(); save(); }
+      });
+      Object.assign(S.enrich, r);
+      await save();
+    } catch (e) { S.enrich.error = e.message; console.warn('pitch/audio fill failed', e); }
+    finally { S.enrich.running = false; }
   }
 
   // ---------- Anki sync (+ shared state with the connector) ----------
@@ -78,6 +151,7 @@
       S.ankiOk = true; S.ankiError = '';
       broadcast({ type: 'jar-statuses-changed' });
       phoneSync().catch(() => {});
+      enrichCards();
     } catch (e) {
       S.ankiOk = false; S.ankiError = e.message;
       throw e;
@@ -125,6 +199,7 @@
       scan: { ...S.scan, titles: S.scanned.length },
       platform: JA.platform || 'extension', dataError: S.dataError || '', dataProgress: JA.safariData ? JA.safariData.progress : '',
       phone: { ...S.phone, enabled: JA.sync.enabled() },
+      enrich: S.enrich,
     };
   }
 
@@ -387,10 +462,11 @@
       broadcast({ type: 'jar-statuses-changed' });
       return summary();
     },
-    async retryData() { S.dataError = ''; await JA.safariData.ensure(E, true); return summary(); },
+    async retryData() { S.dataError = ''; S.dataReady = JA.safariData.ensure(E, true).then(() => status('ready'), e => { S.dataError = e.message; }); await S.dataReady; return summary(); },
     async reloadFrequency() { const f = await JA.dict.idbGet('freq'); if (f) E.freq.load(f); broadcast({ type: 'jar-statuses-changed' }); return summary(); },
     downloadJitenFrequency: () => downloadJitenFrequency(),
     tokenize: ({ texts }) => E.tokenizeTexts(texts),
+    aiExplain: m => aiExplain(m),
     // ---- subtitles on other websites: find the frame with the video, open the side panel in the page
     async subsStart(msg, sender) {
       const tabId = msg.tabId || (sender.tab && sender.tab.id);
@@ -438,10 +514,17 @@
   const subsProbes = new Map();
   JA.handlers = H;
 
-  browser.runtime.onMessage.addListener((msg, sender) => {
+  // messages that don't need the dictionary answer as soon as settings are loaded
+  const NO_DATA = new Set(['getState', 'saveSettings', 'setSyncKey', 'phoneSync', 'inboxAdd', 'inboxTake', 'retryData', 'refreshAnki',
+    'subsStart', 'subsHasVideo', 'subsRelay', 'subsProbeReply']);
+  // sendResponse + `return true` works in every browser (Safari doesn't always pass a returned promise back)
+  browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const h = msg && H[msg.type];
     if (!h) return undefined;
-    return S.ready.then(() => h(msg, sender || {})).then(r => ({ ok: true, r }), e => ({ ok: false, error: e.message || String(e) }));
+    S.ready.then(() => (NO_DATA.has(msg.type) ? null : S.dataReady)).then(() => h(msg, sender || {}))
+      .then(r => ({ ok: true, r }), e => ({ ok: false, error: e.message || String(e) }))
+      .then(res => { try { sendResponse(res); } catch { /* page closed */ } });
+    return true;
   });
 
   if (browser.commands && browser.commands.onCommand) {
@@ -457,5 +540,6 @@
     });
   }
 
-  S.ready = init();
+  status('starting');
+  S.ready = init().then(() => { if (JA.platform !== 'safari') status('ready'); }, e => { status('start failed', e.message || String(e)); throw e; });
 })();

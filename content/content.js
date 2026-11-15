@@ -40,8 +40,15 @@
     return res.r;
   });
 
+  // highlights the AI said were not real words, per sentence: Map(sentence -> Set(surface))
+  let aiIgnore = new Map();
+  function setIgnore(list) {
+    aiIgnore = new Map();
+    for (const [sent, surf] of list || []) { if (!aiIgnore.has(sent)) aiIgnore.set(sent, new Set()); aiIgnore.get(sent).add(surf); }
+  }
   async function loadSettings() {
-    const { settings: s } = await browser.storage.local.get('settings');
+    const { settings: s, aiIgnore: ig } = await browser.storage.local.get(['settings', 'aiIgnore']);
+    setIgnore(ig);
     settings = Object.assign({ colors: {}, watchPage: true, showKnown: false, autoParse: [], targetDeck: 'Japanese' }, s || {});
     applyStyle();
   }
@@ -133,7 +140,15 @@
       const { results, words: info } = await send({ type: 'tokenize', texts: batch.map(sg => sg.text) });
       for (const [k, v] of Object.entries(info)) if (!words.has(k)) words.set(k, { ...v, count: 0, el: null, sel: false });
       batch.forEach((sg, j) => {
-        const toks = results[j];
+        let toks = results[j];
+        if (aiIgnore.size) {
+          // the AI said these weren't words in this sentence: leave them unhighlighted
+          for (const [sent, surfs] of aiIgnore) {
+            const at = sg.text.indexOf(sent);
+            if (at < 0) continue;
+            toks = toks.filter(([a, b]) => !(a >= at && b <= at + sent.length && surfs.has(sg.text.slice(a, b))));
+          }
+        }
         const tids = toks.map(() => ++tokenSeq);
         for (const part of sg.parts) {
           if (!part.node.isConnected) continue;
@@ -353,6 +368,7 @@
       button.b{padding:8px 12px;font-size:13px}
     }
     .tip{position:fixed;z-index:2147483647;width:min(280px,calc(100vw - 16px));background:#1d1f23;color:#eee;border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:13px;display:none}
+    .tip .ai{margin:6px 0;padding:6px 8px;border-radius:8px;background:rgba(120,140,255,.14);white-space:normal;line-height:1.45}.tip .ai-l{font-size:10px;font-weight:700;letter-spacing:.08em;background:#6c7cff;color:#fff;border-radius:4px;padding:1px 5px;margin-right:2px}.tip .ai-n{color:#aab;font-size:12px;margin-top:3px}
     .tip .w{font-size:22px}.tip .r{font-size:13px}.tip .m{white-space:normal;font-size:13px;color:#ddd;margin:6px 0}
     .pill{display:inline-block;font-size:11px;border-radius:9px;padding:1px 8px;margin-top:4px}
     .s0{background:#e5484d33;color:#ff9b9e}.s1{background:#3e8ef733;color:#9cc4ff}.s2{background:#f5a52433;color:#ffd38a}.s3,.s4{background:#2fb26b33;color:#8fe0b2}
@@ -479,11 +495,62 @@
         h('button', { class: 'b a', onclick: () => { addToAnki([key]); hideTip(); } }, '＋ Anki'),
         h('button', { class: 'b g k', onclick: () => { markKnown([key]); hideTip(); } }, 'Known'),
         h('button', { class: 'b g s', onclick: () => { toggleSelect(key); renderPanel(); hideTip(); } }, w.sel ? 'Unselect' : 'Select'))].filter(Boolean));
-    const r = sp.getBoundingClientRect();
-    t.style.display = 'block';
-    const top = r.bottom + 6 + t.offsetHeight > innerHeight ? r.top - t.offsetHeight - 6 : r.bottom + 6;
-    t.style.top = Math.max(4, top) + 'px';
-    t.style.left = Math.max(8, Math.min(innerWidth - t.offsetWidth - 8, r.left)) + 'px';
+    const place = () => {
+      const r = sp.getBoundingClientRect();
+      t.style.display = 'block';
+      const top = r.bottom + 6 + t.offsetHeight > innerHeight ? r.top - t.offsetHeight - 6 : r.bottom + 6;
+      t.style.top = Math.max(4, top) + 'px';
+      t.style.left = Math.max(8, Math.min(innerWidth - t.offsetWidth - 8, r.left)) + 'px';
+    };
+    place();
+    if (settings && settings.aiKey && settings.aiHover !== false) aiForTip(sp, w, surf, place);
+  }
+
+  /** Ask the AI what the word means in this sentence; if it isn't a word here, remove the highlight. */
+  async function aiForTip(sp, w, surf, place) {
+    const t = ui.tip, key = sp.dataset.k;
+    const box = h('div', { class: 'ai' }, h('span', { class: 'ai-l' }, 'AI'), ' Reading the sentence…');
+    t.insertBefore(box, t.querySelector('.pill'));
+    place();
+    const sentence = sentenceFor(sp);
+    let r;
+    try { r = await send({ type: 'aiExplain', word: w.w, reading: w.r, surface: surf, sentence, gloss: w.g }); }
+    catch (e) { if (box.isConnected) { box.replaceChildren(h('span', { class: 'ai-l' }, 'AI'), ' ' + e.message); place(); } return; }
+    const still = tipKey === key && box.isConnected;
+    if (r.valid) {
+      if (!still) return;
+      box.replaceChildren(h('span', { class: 'ai-l' }, 'AI'), ' ',
+        h('b', null, r.word + (r.reading && r.reading !== r.word ? `（${r.reading}）` : '')), ': ' + r.meaning,
+        r.note ? h('div', { class: 'ai-n' }, r.note) : null);
+      place();
+      return;
+    }
+    // not a word here: unhighlight it in this sentence, and remember that for next time
+    unhighlight(sp);
+    const ig = ((await browser.storage.local.get('aiIgnore')).aiIgnore || []).filter(x => !(x[0] === sentence && x[1] === surf));
+    ig.push([sentence, surf]);
+    await browser.storage.local.set({ aiIgnore: ig.slice(-3000) });
+    setIgnore(ig);
+    if (still) {
+      t.replaceChildren(h('div', { class: 'ai' }, h('span', { class: 'ai-l' }, 'AI'),
+        ` 「${surf}」 isn't a word in this sentence` + (r.partOf ? ` — it's part of 「${r.partOf}」.` : '.') + ' Highlight removed.'));
+      place();
+      setTimeout(() => { if (tipKey === key) hideTip(); }, 3500);
+    }
+  }
+  function unhighlight(sp) {
+    const tid = sp.dataset.t;
+    const scope = (sp.parentElement && sp.parentElement.closest(BLOCK)) || document;
+    const list = tid ? [...scope.querySelectorAll(`.jar-w[data-t="${tid}"]`)] : [sp];
+    const w = words.get(sp.dataset.k);
+    for (const x of list) {
+      const set = spans.get(x.dataset.k);
+      if (set) set.delete(x);
+      if (w && w.el === x) { w.el = set && set.size ? [...set][0] : null; }
+      x.replaceWith(document.createTextNode(x.textContent));
+    }
+    if (w) { w.count = Math.max(0, w.count - 1); if (!w.count) { w.sel = false; } }
+    renderPanel();
   }
   /** Text of the whole word when it is split over several pieces (e.g. per-kanji furigana). */
   function fullSurface(sp) {

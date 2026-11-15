@@ -40,6 +40,8 @@ async function load() {
   $('targetDeck').value = S.targetDeck;
   $('tags').value = S.tags.join(' ');
   $('allowDuplicates').checked = S.allowDuplicates;
+  $('pitchAccent').checked = S.pitchAccent !== false;
+  $('wordAudio').checked = S.wordAudio !== false;
   for (const k of ['unknown', 'new', 'learning', 'known']) $('c_' + k).value = S.colors[k];
   $('showKnown').checked = S.showKnown; $('watchPage').checked = S.watchPage;
   $('autoParse').value = (S.autoParse || []).join('\n');
@@ -132,6 +134,8 @@ function collect() {
     fieldMap,
     tags: $('tags').value.split(/\s+/).filter(Boolean),
     allowDuplicates: $('allowDuplicates').checked,
+    pitchAccent: $('pitchAccent').checked,
+    wordAudio: $('wordAudio').checked,
     colors: { unknown: $('c_unknown').value, new: $('c_new').value, learning: $('c_learning').value, known: $('c_known').value },
     showKnown: $('showKnown').checked,
     watchPage: $('watchPage').checked,
