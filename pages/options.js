@@ -41,6 +41,10 @@ async function load() {
   $('tags').value = S.tags.join(' ');
   $('allowDuplicates').checked = S.allowDuplicates;
   $('pitchAccent').checked = S.pitchAccent !== false;
+  $('orderByFreq').checked = S.orderByFreq !== false;
+  $('parenFurigana').checked = S.parenFurigana !== false;
+  $('i1MinRank').value = S.i1MinRank || '';
+  $('i1MaxRank').value = S.i1MaxRank || '';
   $('wordAudio').checked = S.wordAudio !== false;
   for (const k of ['unknown', 'new', 'learning', 'known']) $('c_' + k).value = S.colors[k];
   $('showKnown').checked = S.showKnown; $('watchPage').checked = S.watchPage;
@@ -135,6 +139,10 @@ function collect() {
     tags: $('tags').value.split(/\s+/).filter(Boolean),
     allowDuplicates: $('allowDuplicates').checked,
     pitchAccent: $('pitchAccent').checked,
+    orderByFreq: $('orderByFreq').checked,
+    parenFurigana: $('parenFurigana').checked,
+    i1MinRank: Math.max(0, parseInt($('i1MinRank').value, 10) || 0),
+    i1MaxRank: Math.max(0, parseInt($('i1MaxRank').value, 10) || 0),
     wordAudio: $('wordAudio').checked,
     colors: { unknown: $('c_unknown').value, new: $('c_new').value, learning: $('c_learning').value, known: $('c_known').value },
     showKnown: $('showKnown').checked,

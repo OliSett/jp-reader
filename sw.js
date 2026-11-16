@@ -1,5 +1,5 @@
-// JP Reader offline cache 8c1f32d9c366
-const CACHE = 'jpr-8c1f32d9c366';
+// JP Reader offline cache 1808cb3565ca
+const CACHE = 'jpr-1808cb3565ca';
 const FILES = ["./","background.js","content/content.js","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","icons/icon.svg","index.html","lib/anki.js","lib/archive.js","lib/boot.js","lib/deinflect.js","lib/dictionary.js","lib/engine.js","lib/epub.js","lib/frequency.js","lib/jiten.js","lib/kana.js","lib/pitch.js","lib/recommend.js","lib/safari-data.js","lib/settings.js","lib/shared.js","lib/subtitles.js","lib/sync.js","lib/tokenizer.js","manifest.webmanifest","pages/ai-settings.js","pages/api.js","pages/bulk.html","pages/bulk.js","pages/options.html","pages/options.js","pages/reader.html","pages/reader.js","pages/recommend.html","pages/recommend.js","pages/safari-settings.html","pages/safari-settings.js","pages/ui.css","pages/video.html","pages/video.js","web/frame-shim.js","web/frame.css","web/platform.js","web/settings.html","web/settings.js","web/shell.js"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

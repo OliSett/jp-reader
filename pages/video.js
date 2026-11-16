@@ -76,19 +76,12 @@ function buildTranscript() {
 /** Episode coverage and i+1 lines (exactly one word you don't know). */
 function updateCoverage() {
   if (!window.__jar) return;
-  const words = window.__jar.words;
-  let tot = 0, known = 0, i1 = 0;
+    let tot = 0, known = 0, i1 = 0;
   for (const el of cueEls) {
-    let unknown = 0;
-    for (const sp of el.querySelectorAll('.jar-w')) {
-      if (sp.dataset.t && sp !== el.querySelector(`.jar-w[data-t="${sp.dataset.t}"]`)) continue;
-      const w = words.get(sp.dataset.k);
-      if (!w) continue;
-      tot++;
-      if (w.st >= 2) known++; else unknown++;
-    }
-    el.classList.toggle('i1', unknown === 1);
-    if (unknown === 1) i1++;
+    const r = window.__jar.lineStats(el);
+    tot += r.tot; known += r.known;
+    el.classList.toggle('i1', r.i1);
+    if (r.i1) i1++;
   }
   $('cov').textContent = tot ? `Episode: ${Math.round((known / tot) * 100)}% of words known · ${i1} lines with exactly one new word (marked i+1)` : `${cues.length} lines`;
 }
@@ -169,6 +162,37 @@ $('full').onclick = () => {
   else w.classList.toggle('full');
 };
 
+// i+1 frequency range (shared with the subtitle panel on other sites, via Settings)
+(async () => {
+  try {
+    const st = await bg('getState');
+    $('i1lo').value = st.settings.i1MinRank || '';
+    $('i1hi').value = st.settings.i1MaxRank || '';
+  } catch { /* background not ready */ }
+  const save = async () => {
+    await bg('saveSettings', { settings: { i1MinRank: Math.max(0, parseInt($('i1lo').value, 10) || 0), i1MaxRank: Math.max(0, parseInt($('i1hi').value, 10) || 0) } });
+    if (window.__jar && window.__jar.reloadSettings) window.__jar.reloadSettings();
+  };
+  $('i1lo').onchange = save; $('i1hi').onchange = save;
+})();
+window.addEventListener('jar-settings', () => updateCoverage());
+
+// playback speed: tap to cycle, [ and ] step down/up; remembered between videos
+const SPEEDS = [0.5, 0.6, 0.7, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+let speed = 1;
+try { speed = parseFloat(localStorage.getItem('jarSpeed')) || 1; } catch { /* storage off */ }
+function setSpeed(v) {
+  speed = Math.max(0.25, Math.min(3, Math.round(v * 100) / 100));
+  video.playbackRate = speed; video.defaultPlaybackRate = speed;
+  $('speed').textContent = `Speed ${speed}×`;
+  $('speed').classList.toggle('g', speed === 1);
+  try { localStorage.setItem('jarSpeed', String(speed)); } catch { /* storage off */ }
+}
+const stepSpeed = d => { const i = SPEEDS.findIndex(x => x >= speed - 0.001); setSpeed(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.length - 1 : i) + d))]); };
+$('speed').onclick = () => { const i = [0.5, 0.75, 1, 1.25, 1.5].findIndex(x => x > speed + 0.001); setSpeed(i < 0 ? 0.5 : [0.5, 0.75, 1, 1.25, 1.5][i]); };
+video.addEventListener('loadedmetadata', () => { video.playbackRate = speed; });
+setSpeed(speed);
+
 document.addEventListener('keydown', e => {
   if (e.target.closest('input,textarea,select') || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
@@ -180,6 +204,8 @@ document.addEventListener('keydown', e => {
   else if (k === 's') $('subsBtn').click();
   else if (k === 'z') setOffset(offset - 0.1);
   else if (k === 'x') setOffset(offset + 0.1);
+  else if (k === '[') stepSpeed(-1);
+  else if (k === ']') stepSpeed(1);
   else if (k === 'escape') $('vwrap').classList.remove('full');
 });
 

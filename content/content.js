@@ -46,9 +46,12 @@
     aiIgnore = new Map();
     for (const [sent, surf] of list || []) { if (!aiIgnore.has(sent)) aiIgnore.set(sent, new Set()); aiIgnore.get(sent).add(surf); }
   }
+  // the real words the AI found instead: [sentence, text, key, info]
+  let aiAdd = [];
   async function loadSettings() {
-    const { settings: s, aiIgnore: ig } = await browser.storage.local.get(['settings', 'aiIgnore']);
+    const { settings: s, aiIgnore: ig, aiAdd: ad } = await browser.storage.local.get(['settings', 'aiIgnore', 'aiAdd']);
     setIgnore(ig);
+    aiAdd = ad || [];
     settings = Object.assign({ colors: {}, watchPage: true, showKnown: false, autoParse: [], targetDeck: 'Japanese' }, s || {});
     applyStyle();
   }
@@ -128,8 +131,54 @@
     return segs;
   }
 
+  // 漢字（かんじ） / 漢字(かんじ): kanji, maybe okurigana, then kana in brackets. Speaker labels like
+  // （オリバー）こんにちは or (Oliver) Hello! have no kanji right before the bracket, so they're left alone.
+  const PAREN = /([\u3400-\u9fff\u3005\u3006\u30f6]+[\u3041-\u3096]*)[（(]([\u3041-\u3096\u30a1-\u30fa\u30fc]{1,16})[）)]/g;
+  /** Turn readings in brackets into furigana. Returns the node list with replaced text nodes swapped in. */
+  async function parenFurigana(nodes) {
+    if (settings.parenFurigana === false) return nodes;
+    const hits = [];
+    for (const n of nodes) {
+      if (!n.isConnected || !/[（(]/.test(n.nodeValue) || (n.parentElement && n.parentElement.closest('ruby'))) continue;
+      PAREN.lastIndex = 0;
+      let m;
+      while ((m = PAREN.exec(n.nodeValue))) hits.push({ n, i: m.index, len: m[0].length, run: m[1], rd: m[2] });
+    }
+    if (!hits.length) return nodes;
+    let fit;
+    try { fit = await send({ type: 'furiganaFit', pairs: hits.map(x => [x.run, x.rd]) }); } catch { return nodes; }
+    const byNode = new Map();
+    hits.forEach((x, i) => { if (fit[i] && fit[i].n > 0) { if (!byNode.has(x.n)) byNode.set(x.n, []); byNode.get(x.n).push({ ...x, ...fit[i] }); } });
+    if (!byNode.size) return nodes;
+    const out = [];
+    for (const n of nodes) {
+      const list = byNode.get(n);
+      if (!list || !n.isConnected) { out.push(n); continue; }
+      const text = n.nodeValue, frag = document.createDocumentFragment();
+      let pos = 0;
+      const addText = t => { if (t) { const tn = document.createTextNode(t); frag.appendChild(tn); out.push(tn); } };
+      for (const x of list) {
+        const okuri = (x.run.match(/[\u3041-\u3096]+$/) || [''])[0];
+        const kanjiEnd = x.i + x.run.length - okuri.length;
+        addText(text.slice(pos, kanjiEnd - x.n));
+        const rb = document.createElement('ruby');
+        rb.dataset.jarFuri = '1';
+        const kt = document.createTextNode(text.slice(kanjiEnd - x.n, kanjiEnd));
+        rb.appendChild(kt); out.push(kt);
+        const rt = document.createElement('rt'); rt.textContent = x.r; rb.appendChild(rt);
+        frag.appendChild(rb);
+        addText(okuri);
+        pos = x.i + x.len; // the bracket and its reading are gone
+      }
+      addText(text.slice(pos));
+      n.replaceWith(frag);
+    }
+    return out;
+  }
+
   let tokenSeq = 0;
   async function processNodes(nodes, opts = {}) {
+    nodes = await parenFurigana(nodes.filter(n => n.isConnected));
     const segs = segments(nodes.filter(n => n.isConnected));
     let i = 0;
     while (i < segs.length) {
@@ -148,6 +197,16 @@
             if (at < 0) continue;
             toks = toks.filter(([a, b]) => !(a >= at && b <= at + sent.length && surfs.has(sg.text.slice(a, b))));
           }
+        }
+        for (const [sent, text, key, info] of aiAdd) {
+          // ...and highlight the word that is really written there instead
+          const at = sg.text.indexOf(sent);
+          if (at < 0) continue;
+          const a = sg.text.indexOf(text, at);
+          if (a < 0 || a + text.length > at + sent.length) continue;
+          const b = a + text.length;
+          if (!words.has(key)) words.set(key, { ...info, count: 0, el: null, sel: false });
+          toks = toks.filter(([x, y]) => y <= a || x >= b).concat([[a, b, key]]).sort((p, q) => p[0] - q[0]);
         }
         const tids = toks.map(() => ++tokenSeq);
         for (const part of sg.parts) {
@@ -526,19 +585,71 @@
       return;
     }
     // not a word here: unhighlight it in this sentence, and remember that for next time
+    const block = (sp.parentElement && sp.parentElement.closest(BLOCK)) || document.body;
+    const where = textOffset(block, sp);
     unhighlight(sp);
     const ig = ((await browser.storage.local.get('aiIgnore')).aiIgnore || []).filter(x => !(x[0] === sentence && x[1] === surf));
     ig.push([sentence, surf]);
-    await browser.storage.local.set({ aiIgnore: ig.slice(-3000) });
+    const save = { aiIgnore: ig.slice(-3000) };
     setIgnore(ig);
+    // the word really written there: highlight it if it isn't in Anki yet
+    const act = r.actual;
+    let marked = false;
+    if (act && !act.inAnki) {
+      marked = markText(block, act.text, where, act.key, act.info);
+      aiAdd = aiAdd.filter(x => !(x[0] === sentence && x[1] === act.text)).concat([[sentence, act.text, act.key, act.info]]).slice(-3000);
+      save.aiAdd = aiAdd;
+    }
+    await browser.storage.local.set(save);
     if (still) {
       t.replaceChildren(h('div', { class: 'ai' }, h('span', { class: 'ai-l' }, 'AI'),
-        ` 「${surf}」 isn't a word in this sentence` + (r.partOf ? ` — it's part of 「${r.partOf}」.` : '.') + ' Highlight removed.'));
+        ` 「${surf}」 isn't a word in this sentence` + (r.partOf ? ` — it's part of 「${r.partOf}」.` : '.')
+        + (marked ? ` Highlighted 「${act.text}」 instead${act.info.g ? ' (' + act.info.g + ')' : ''}.` : act && act.inAnki ? ` 「${act.text}」 is already in Anki.` : ' Highlight removed.')));
       place();
-      setTimeout(() => { if (tipKey === key) hideTip(); }, 3500);
+      setTimeout(() => { if (tipKey === key) hideTip(); }, 4500);
     }
   }
-  function unhighlight(sp) {
+
+  /** Text nodes of a block (not our own UI), with their offsets in the block's text. */
+  function blockTexts(block) {
+    const out = []; let pos = 0;
+    const tw = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, { acceptNode: n => (n.parentElement && n.parentElement.closest('rt,script,style,#jar-host') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+    let n;
+    while ((n = tw.nextNode())) { out.push({ node: n, start: pos, end: pos + n.nodeValue.length }); pos += n.nodeValue.length; }
+    return out;
+  }
+  function textOffset(block, el) {
+    const first = el.firstChild;
+    const hit = blockTexts(block).find(x => x.node === first);
+    return hit ? hit.start : -1;
+  }
+  /** Highlight `text` in the block, at the occurrence nearest `near`, as word `key`. */
+  function markText(block, text, near, key, info) {
+    let all = blockTexts(block).map(x => x.node.nodeValue).join('');
+    let a = -1, best = Infinity;
+    for (let i = all.indexOf(text); i >= 0; i = all.indexOf(text, i + 1)) {
+      const d = near < 0 ? 0 : (near >= i && near < i + text.length ? 0 : Math.abs(i - near));
+      if (d < best) { best = d; a = i; }
+    }
+    if (a < 0) return false;
+    const b = a + text.length;
+    // anything else highlighted inside that word goes
+    for (const x of blockTexts(block)) {
+      if (x.end <= a || x.start >= b) continue;
+      const w = x.node.parentElement && x.node.parentElement.closest('.jar-w');
+      if (w && block.contains(w)) unhighlight(w, true);
+    }
+    if (!words.has(key)) words.set(key, { ...info, count: 0, el: null, sel: false });
+    const tid = ++tokenSeq;
+    for (const x of blockTexts(block)) {
+      if (x.end <= a || x.start >= b) continue;
+      const head = x.start <= a;
+      wrap(x.node, [[Math.max(a, x.start) - x.start, Math.min(b, x.end) - x.start, key, head, (x.start > a || x.end < b) ? tid : 0]]);
+    }
+    renderPanel();
+    return true;
+  }
+  function unhighlight(sp, quiet) {
     const tid = sp.dataset.t;
     const scope = (sp.parentElement && sp.parentElement.closest(BLOCK)) || document;
     const list = tid ? [...scope.querySelectorAll(`.jar-w[data-t="${tid}"]`)] : [sp];
@@ -550,7 +661,7 @@
       x.replaceWith(document.createTextNode(x.textContent));
     }
     if (w) { w.count = Math.max(0, w.count - 1); if (!w.count) { w.sel = false; } }
-    renderPanel();
+    if (!quiet) renderPanel();
   }
   /** Text of the whole word when it is split over several pieces (e.g. per-kanji furigana). */
   function fullSurface(sp) {
@@ -598,7 +709,7 @@
       return Promise.resolve({ title: document.title, url: location.href, text: blockTextDeep(root) });
     }
     if (msg.type === 'jar-statuses-changed') { if (active || words.size) refreshStatuses().catch(() => {}); }
-    if (msg.type === 'jar-settings-changed') { loadSettings().then(() => renderPanel()); }
+    if (msg.type === 'jar-settings-changed') { loadSettings().then(() => { renderPanel(); window.dispatchEvent(new Event('jar-settings')); }); }
     return undefined;
   });
 
@@ -616,7 +727,29 @@
   }
   document.addEventListener('fullscreenchange', placeHost);
 
+  /**
+   * Is this subtitle line i+1? Exactly one word you don't know, and that word is not in Anki yet
+   * and within the frequency range set in Settings (i+1 words: rank from / up to).
+   */
+  function lineStats(el) {
+    let tot = 0, known = 0, unknown = 0, target = null;
+    const seen = new Set();
+    for (const sp of el.querySelectorAll('.jar-w')) {
+      if (sp.dataset.t) { if (seen.has(sp.dataset.t)) continue; seen.add(sp.dataset.t); }
+      const w = words.get(sp.dataset.k);
+      if (!w) continue;
+      tot++;
+      if (w.st >= 2) known++; else { unknown++; target = w; }
+    }
+    const lo = +settings.i1MinRank || 0, hi = +settings.i1MaxRank || 0;
+    const inRange = t => !lo && !hi ? true : t.f > 0 && t.f >= lo && (!hi || t.f <= hi);
+    const i1 = unknown === 1 && target.st === 0 && inRange(target);
+    return { tot, known, unknown, i1, target: i1 ? target : null };
+  }
+
   window.__jar = {
+    lineStats,
+    reloadSettings: () => loadSettings().then(() => { renderPanel(); window.dispatchEvent(new Event('jar-settings')); }),
     parsePage, clearPage, words, spans, refreshStatuses, processNodes, buildUI, hideTip, renderPanel, send, h, TOP,
     ui: () => ui, panelOffset: px => { if (ui) ui.$('.panel').style.right = (14 + px) + 'px'; },
   };

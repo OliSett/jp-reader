@@ -67,7 +67,9 @@
 Decide whether the highlighted text, exactly as cut, is a real word here (an inflected form counts).
 It is NOT valid when it is only part of a longer word or name (e.g. 和 inside the name 和真, 一歳 inside 二一歳) or when it joins pieces of two different words (e.g. よカ in よカズマ).
 Reply with JSON only, no other text:
-{"valid": true or false, "word": "dictionary form", "reading": "hiragana", "meaning": "short English meaning as used in this sentence, max 12 words", "note": "optional nuance or grammar note, max 15 words, or empty", "part_of": "if not valid: the real word or name it belongs to, else empty"}`;
+{"valid": true or false, "word": "dictionary form", "reading": "hiragana", "meaning": "short English meaning as used in this sentence, max 12 words", "note": "optional nuance or grammar note, max 15 words, or empty", "part_of": "if not valid: the real word or name it belongs to, else empty",
+ "actual_text": "if not valid: that real word exactly as written in the sentence (a substring of the sentence that contains or overlaps the highlighted text), else empty",
+ "actual_word": "if not valid: its dictionary form", "actual_reading": "if not valid: its reading in hiragana", "actual_meaning": "if not valid: its English meaning here (for a name: 'name (Kazuma)'), max 12 words"}`;
   const aiCache = new Map();
   async function aiExplain({ word, reading, surface, sentence, gloss }) {
     const s = S.settings;
@@ -91,9 +93,48 @@ Reply with JSON only, no other text:
     let r;
     try { r = JSON.parse(text.match(/\{[\s\S]*\}/)[0]); } catch { throw new Error('The AI answer could not be read.'); }
     const out = { valid: r.valid !== false, word: r.word || word, reading: r.reading || '', meaning: r.meaning || '', note: r.note || '', partOf: r.part_of || '' };
+    const at = String(r.actual_text || '').trim();
+    if (!out.valid && at && at !== surface && sentence.includes(at)) out.actual = aiActualWord(at, r);
     aiCache.set(ck, out);
     if (aiCache.size > 1000) aiCache.delete(aiCache.keys().next().value);
     return out;
+  }
+
+  /** The word the AI says is really written there, as the page needs it (status from Anki, dictionary meaning if any). */
+  function aiActualWord(text, r) {
+    const word = String(r.actual_word || text).trim(), reading = JA.kana.toHira(String(r.actual_reading || '').trim());
+    let rec = null;
+    try { rec = E.lookupWords([word])[0]; } catch { /* no dictionary yet */ }
+    const fromDict = rec && rec.key && rec.key.startsWith('j:') && rec.meaning;
+    const key = fromDict ? rec.key : 't:' + word;
+    const info = {
+      w: word, r: (fromDict ? rec.reading : reading) === word ? '' : (fromDict ? rec.reading : reading),
+      g: fromDict ? rec.meaning : String(r.actual_meaning || ''), k: '', st: rec ? rec.status : JA.ST.UNKNOWN, u: !fromDict, f: rec ? rec.rank : null,
+    };
+    return { text, key, info, inAnki: info.st >= JA.ST.NEW };
+  }
+
+  // ---------- 漢字（かんじ）: readings in brackets become furigana ----------
+  /**
+   * run = kanji (+ trailing okurigana) just before the bracket, rd = the kana inside it.
+   * Returns { n: how many of the trailing kanji the reading belongs to (0 = it isn't a reading), r: reading for those kanji }.
+   */
+  function furiganaFit(run, rd) {
+    const kana = JA.kana.toHira(rd);
+    const okuri = (run.match(/[\u3041-\u3096]+$/) || [''])[0];
+    const kanji = run.slice(0, run.length - okuri.length);
+    if (!kanji || (okuri && !kana.endsWith(okuri))) return { n: 0 };
+    const base = kana.slice(0, kana.length - okuri.length);
+    if (!base) return { n: 0 };
+    if (E.dict.loaded) {
+      for (let n = kanji.length; n >= 1; n--) {
+        const idxs = E.dict.lookup(kanji.slice(-n) + okuri) || [];
+        if (idxs.some(i => E.dict.rows[i][2].some(k => JA.kana.toHira(k) === kana))) return { n, r: base };
+      }
+    }
+    // not in the dictionary (names, rare words): only when the length is plausible for all the kanji
+    if (kanji.length <= 4 && base.length >= kanji.length && base.length <= kanji.length * 4) return { n: kanji.length, r: base };
+    return { n: 0 };
   }
 
   // ---------- pitch accent + word audio on cards ----------
@@ -124,6 +165,14 @@ Reply with JSON only, no other text:
       });
       Object.assign(S.enrich, r);
       await save();
+      // frequency number on every card (hidden) + new cards ordered by it; the full re-order runs once
+      if (E.freq.loaded) {
+        const { freqOrdered } = await store.get('freqOrdered');
+        const f = await JA.anki.fillFreq({ ...S.settings, orderByFreq: S.settings.orderByFreq !== false && freqOrdered !== 1 ? true : false }, (w, rd) => E.rankOf(w, rd), p => Object.assign(S.enrich, { done: p.done, total: p.total }));
+        if (S.settings.orderByFreq !== false && freqOrdered !== 1) await store.set({ freqOrdered: 1 });
+        else if (f.filled && S.settings.orderByFreq !== false) await JA.anki.fillFreq(S.settings, (w, rd) => E.rankOf(w, rd));
+        S.enrich.freq = f;
+      }
     } catch (e) { S.enrich.error = e.message; console.warn('pitch/audio fill failed', e); }
     finally { S.enrich.running = false; }
   }
@@ -270,6 +319,7 @@ Reply with JSON only, no other text:
           if (pending.length && S.ankiOk) {
             for (let i = 0; i < pending.length; i += 100) {
               const part = pending.slice(i, i + 100);
+              for (const p of part) if (!(p.item.freq > 0)) p.item.freq = E.rankOf(p.item.word, p.item.reading) || null;
               const r = await JA.anki.addCards(part.map(p => p.item), S.settings);
               const added = new Set(r.addedItems);
               const dupes = new Set(r.failed.filter(f => /duplicate/i.test(f.reason)).map(f => f.word));
@@ -467,6 +517,7 @@ Reply with JSON only, no other text:
     downloadJitenFrequency: () => downloadJitenFrequency(),
     tokenize: ({ texts }) => E.tokenizeTexts(texts),
     aiExplain: m => aiExplain(m),
+    furiganaFit: ({ pairs }) => pairs.map(([run, rd]) => furiganaFit(run, rd)),
     // ---- subtitles on other websites: find the frame with the video, open the side panel in the page
     async subsStart(msg, sender) {
       const tabId = msg.tabId || (sender.tab && sender.tab.id);
